@@ -1,92 +1,230 @@
 require 'sinatra'
 require 'sinatra/base'
-require 'sqlite3'
 require 'bcrypt'
 require 'json'
 require 'fileutils'
+require 'uri'
+require 'dotenv/load'  # Load .env file for local development
+
+# Database setup based on environment
+begin
+  require 'pg'
+rescue LoadError
+  # pg might not be installed locally
+end
+
+begin
+  require 'sqlite3'
+rescue LoadError
+  # sqlite3 might not be installed in production
+end
+
+# PostgreSQL result wrapper to match SQLite's interface
+class PostgresWrapper
+  def initialize(pg_conn)
+    @pg_conn = pg_conn
+  end
+
+  def method_missing(method, *args)
+    @pg_conn.send(method, *args)
+  end
+
+  def execute(sql, params = [])
+    result = @pg_conn.exec_params(sql, params)
+    result.map { |row| row }
+  end
+
+  def execute_batch(sql)
+    # Split SQL statements and execute each
+    @pg_conn.exec(sql)
+  end
+
+  def close
+    @pg_conn.close
+  end
+end
 
 class App < Sinatra::Base
   configure do
-    set :port, 8080
+    set :port, ENV['PORT'] || 8080
     set :bind, '0.0.0.0'
     set :views, File.dirname(__FILE__) + '/views'
     set :public_folder, File.dirname(__FILE__) + '/public'
     enable :sessions
     set :method_override, true
-    set :session_secret, 'a_very_long_random_string_that_is_at_least_64_characters_long_1234567890'
+    set :session_secret, ENV['SESSION_SECRET'] || 'change_me_in_production_a_very_long_random_string_that_is_at_least_64_characters_long'
+  end
+
+  def using_postgres?
+    !ENV['DATABASE_URL'].nil?
   end
 
   def db
     @db ||= begin
-      d = SQLite3::Database.new(File.dirname(__FILE__) + '/basecamp.db')
-      d.results_as_hash = true
-      d.execute_batch <<-SQL
-        CREATE TABLE IF NOT EXISTS users (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          username TEXT UNIQUE NOT NULL,
-          email TEXT UNIQUE NOT NULL,
-          password_hash TEXT NOT NULL,
-          is_admin INTEGER DEFAULT 0,
-          created_at TEXT DEFAULT (datetime('now'))
-        );
-        CREATE TABLE IF NOT EXISTS projects (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          name TEXT NOT NULL,
-          description TEXT,
-          owner_id INTEGER NOT NULL,
-          created_at TEXT DEFAULT (datetime('now')),
-          FOREIGN KEY (owner_id) REFERENCES users(id)
-        );
-        CREATE TABLE IF NOT EXISTS project_members (
-          project_id INTEGER,
-          user_id INTEGER,
-          is_admin INTEGER DEFAULT 0,
-          PRIMARY KEY (project_id, user_id),
-          FOREIGN KEY (project_id) REFERENCES projects(id),
-          FOREIGN KEY (user_id) REFERENCES users(id)
-        );
-        CREATE TABLE IF NOT EXISTS attachments (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          project_id INTEGER NOT NULL,
-          user_id INTEGER NOT NULL,
-          filename TEXT NOT NULL,
-          format TEXT NOT NULL,
-          file_path TEXT NOT NULL,
-          created_at TEXT DEFAULT (datetime('now')),
-          FOREIGN KEY (project_id) REFERENCES projects(id),
-          FOREIGN KEY (user_id) REFERENCES users(id)
-        );
-        CREATE TABLE IF NOT EXISTS threads (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          project_id INTEGER NOT NULL,
-          user_id INTEGER NOT NULL,
-          title TEXT NOT NULL,
-          description TEXT,
-          created_at TEXT DEFAULT (datetime('now')),
-          updated_at TEXT DEFAULT (datetime('now')),
-          FOREIGN KEY (project_id) REFERENCES projects(id),
-          FOREIGN KEY (user_id) REFERENCES users(id)
-        );
-        CREATE TABLE IF NOT EXISTS messages (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          thread_id INTEGER NOT NULL,
-          user_id INTEGER NOT NULL,
-          content TEXT NOT NULL,
-          created_at TEXT DEFAULT (datetime('now')),
-          updated_at TEXT DEFAULT (datetime('now')),
-          FOREIGN KEY (thread_id) REFERENCES threads(id),
-          FOREIGN KEY (user_id) REFERENCES users(id)
-        );
-      SQL
-      
-      # Migration: Add is_admin column to project_members if it doesn't exist
-      begin
-        d.execute("ALTER TABLE project_members ADD COLUMN is_admin INTEGER DEFAULT 0")
-      rescue SQLite3::SQLException => e
-        # Column already exists or other error, ignore
+      if using_postgres?
+        require 'pg'
+        establish_postgres_connection
+      else
+        require 'sqlite3'
+        establish_sqlite_connection
       end
-      
-      d
+    end
+  end
+
+  def establish_sqlite_connection
+    d = SQLite3::Database.new(File.dirname(__FILE__) + '/basecamp.db')
+    d.results_as_hash = true
+    init_sqlite_tables(d)
+    d
+  end
+
+  def establish_postgres_connection
+    uri = URI.parse(ENV['DATABASE_URL'])
+    conn = PG.connect(
+      host: uri.host,
+      port: uri.port,
+      user: uri.user,
+      password: uri.password,
+      dbname: uri.path.delete('/')
+    )
+    wrapper = PostgresWrapper.new(conn)
+    init_postgres_tables(wrapper)
+    wrapper
+  end
+
+  def init_sqlite_tables(d)
+    d.execute_batch <<-SQL
+      CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        is_admin INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+      CREATE TABLE IF NOT EXISTS projects (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        description TEXT,
+        owner_id INTEGER NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (owner_id) REFERENCES users(id)
+      );
+      CREATE TABLE IF NOT EXISTS project_members (
+        project_id INTEGER,
+        user_id INTEGER,
+        is_admin INTEGER DEFAULT 0,
+        PRIMARY KEY (project_id, user_id),
+        FOREIGN KEY (project_id) REFERENCES projects(id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      CREATE TABLE IF NOT EXISTS attachments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        filename TEXT NOT NULL,
+        format TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (project_id) REFERENCES projects(id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      CREATE TABLE IF NOT EXISTS threads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (project_id) REFERENCES projects(id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        thread_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (thread_id) REFERENCES threads(id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+    SQL
+    
+    # Migration: Add is_admin column to project_members if it doesn't exist
+    begin
+      d.execute("ALTER TABLE project_members ADD COLUMN is_admin INTEGER DEFAULT 0")
+    rescue SQLite3::SQLException => e
+      # Column already exists or other error, ignore
+    end
+  end
+
+  def init_postgres_tables(conn)
+    conn.execute_batch <<-SQL
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        is_admin INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS projects (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        owner_id INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT now(),
+        FOREIGN KEY (owner_id) REFERENCES users(id)
+      );
+      CREATE TABLE IF NOT EXISTS project_members (
+        project_id INTEGER,
+        user_id INTEGER,
+        is_admin INTEGER DEFAULT 0,
+        PRIMARY KEY (project_id, user_id),
+        FOREIGN KEY (project_id) REFERENCES projects(id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      CREATE TABLE IF NOT EXISTS attachments (
+        id SERIAL PRIMARY KEY,
+        project_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        filename TEXT NOT NULL,
+        format TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT now(),
+        FOREIGN KEY (project_id) REFERENCES projects(id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      CREATE TABLE IF NOT EXISTS threads (
+        id SERIAL PRIMARY KEY,
+        project_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        created_at TIMESTAMP DEFAULT now(),
+        updated_at TIMESTAMP DEFAULT now(),
+        FOREIGN KEY (project_id) REFERENCES projects(id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      CREATE TABLE IF NOT EXISTS messages (
+        id SERIAL PRIMARY KEY,
+        thread_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT now(),
+        updated_at TIMESTAMP DEFAULT now(),
+        FOREIGN KEY (thread_id) REFERENCES threads(id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+    SQL
+    
+    # Migration: Add is_admin column if it doesn't exist
+    begin
+      conn.execute("ALTER TABLE project_members ADD COLUMN is_admin INTEGER DEFAULT 0")
+    rescue PG::Error => e
+      # Column already exists, ignore
     end
   end
 
@@ -183,8 +321,12 @@ class App < Sinatra::Base
       db.execute('UPDATE users SET is_admin = 1 WHERE id = ?', [user['id']]) if count == 1
       session[:user_id] = user['id']
       redirect '/'
-    rescue SQLite3::ConstraintException
-      @error = 'Username or email already taken'
+    rescue => e
+      if e.message.include?('UNIQUE constraint failed') || e.message.include?('duplicate key')
+        @error = 'Username or email already taken'
+      else
+        @error = 'An error occurred during registration'
+      end
       erb :register
     end
   end
@@ -341,7 +483,8 @@ class App < Sinatra::Base
     begin
       db.execute('INSERT INTO project_members (project_id, user_id) VALUES (?, ?)',
         [project_id, user_id])
-    rescue SQLite3::ConstraintException
+    rescue => e
+      # Member already exists or other constraint error
     end
     redirect "/projects/#{project_id}"
   end
@@ -496,8 +639,13 @@ class App < Sinatra::Base
       return erb :thread_edit
     end
     
-    db.execute('UPDATE threads SET title = ?, description = ?, updated_at = datetime("now") WHERE id = ?',
-      [title, description, params['id']])
+    if using_postgres?
+      db.execute('UPDATE threads SET title = ?, description = ?, updated_at = now() WHERE id = ?',
+        [title, description, params['id']])
+    else
+      db.execute('UPDATE threads SET title = ?, description = ?, updated_at = datetime("now") WHERE id = ?',
+        [title, description, params['id']])
+    end
     
     redirect "/threads/#{params['id']}"
   end
@@ -569,8 +717,13 @@ class App < Sinatra::Base
       return erb :message_edit
     end
     
-    db.execute('UPDATE messages SET content = ?, updated_at = datetime("now") WHERE id = ?',
-      [content, params['id']])
+    if using_postgres?
+      db.execute('UPDATE messages SET content = ?, updated_at = now() WHERE id = ?',
+        [content, params['id']])
+    else
+      db.execute('UPDATE messages SET content = ?, updated_at = datetime("now") WHERE id = ?',
+        [content, params['id']])
+    end
     
     @thread = db.execute('SELECT * FROM threads WHERE id = ?', [@message['thread_id']]).first
     redirect "/threads/#{@thread['id']}"

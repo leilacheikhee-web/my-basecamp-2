@@ -1,0 +1,37 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+log/
+
+# Dependencies
+Gemfile.lock
+vendor/
+.bundle/
+
+# Uploads (temporary local files)
+public/uploads/*
+!public/uploads/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
