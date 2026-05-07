@@ -1,0 +1,65 @@
+<div class="page">
+  <div class="thread-header">
+    <div>
+      <h1><%= h(@thread['title']) %></h1>
+      <p><%= h(@thread['description'].to_s) %></p>
+      <p class="meta">Started by <a href="/users/<%= @thread['user_id'] %>"><%= h(@thread['author_name']) %></a> on <%= @thread['created_at'] %></p>
+    </div>
+    <% if @thread['user_id'] == @user['id'] || @project['owner_id'] == @user['id'] || @user['is_admin'] == 1 %>
+      <div class="thread-header-actions">
+        <a href="/threads/<%= @thread['id'] %>/edit" class="btn-secondary">Edit</a>
+        <form method="POST" action="/threads/<%= @thread['id'] %>">
+          <input type="hidden" name="_method" value="DELETE">
+          <button class="btn-danger" onclick="return confirm('Delete thread?')">Delete</button>
+        </form>
+      </div>
+    <% end %>
+  </div>
+
+  <div class="messages-container">
+    <h2>Messages</h2>
+    <% if @messages.empty? %>
+      <p class="empty-state">No messages yet. Be the first to post!</p>
+    <% else %>
+      <div class="messages-list">
+        <% @messages.each do |m| %>
+          <div class="message-item">
+            <div class="message-header">
+              <strong><%= h(m['author_name']) %></strong>
+              <span class="meta"><%= m['created_at'] %></span>
+              <% if m['updated_at'] != m['created_at'] %>
+                <span class="meta">(edited)</span>
+              <% end %>
+            </div>
+            <div class="message-content">
+              <%= h(m['content']) %>
+            </div>
+            <% if m['user_id'] == @user['id'] || @user['is_admin'] == 1 %>
+              <div class="message-actions">
+                <a href="/messages/<%= m['id'] %>/edit" class="btn-small">Edit</a>
+                <form method="POST" action="/messages/<%= m['id'] %>" style="display:inline;">
+                  <input type="hidden" name="_method" value="DELETE">
+                  <button class="btn-small btn-danger">Delete</button>
+                </form>
+              </div>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+
+  <div class="add-message" id="reply-form">
+    <h3>Reply</h3>
+    <form method="POST" action="/threads/<%= @thread['id'] %>/messages">
+      <div class="form-group">
+        <textarea name="content" placeholder="Type your reply..." required class="form-input" rows="5"></textarea>
+      </div>
+      <button type="submit" class="btn-primary">Post Reply</button>
+    </form>
+  </div>
+
+  <div class="back-link">
+    <a href="/projects/<%= @project['id'] %>">← Back to Project</a>
+  </div>
+</div>

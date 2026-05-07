@@ -1,0 +1,18 @@
+<div class="page form-page">
+  <h1>Edit Message</h1>
+  <% if @error %>
+    <div class="alert alert-error"><%= h(@error) %></div>
+  <% end %>
+  
+  <form method="POST" action="/messages/<%= @message['id'] %>">
+    <div class="form-group">
+      <label for="content">Message Content *</label>
+      <textarea id="content" name="content" required class="form-input" rows="8"><%= h(@message['content']) %></textarea>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn-primary">Update Message</button>
+      <a href="/threads/<%= @thread['id'] %>" class="btn-secondary">Cancel</a>
+    </div>
+  </form>
+</div>

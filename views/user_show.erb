@@ -1,0 +1,30 @@
+<div class="page">
+  <div class="profile-header">
+    <div class="profile-avatar"><%= @profile['username'][0].upcase %></div>
+    <div>
+      <h1><%= h(@profile['username']) %></h1>
+      <p><%= h(@profile['email']) %></p>
+      <% if @profile['is_admin'] == 1 %><span class="badge admin">Admin</span><% end %>
+    </div>
+    <% if @user['id'] == @profile['id'] || @user['is_admin'] == 1 %>
+      <form method="POST" action="/users/<%= @profile['id'] %>">
+        <input type="hidden" name="_method" value="DELETE">
+        <button class="btn-danger" onclick="return confirm('Delete account?')">Delete Account</button>
+      </form>
+    <% end %>
+  </div>
+  <h2>Projects</h2>
+  <% if @projects.empty? %>
+    <p>No projects yet.</p>
+  <% else %>
+    <div class="projects-grid">
+      <% @projects.each do |p| %>
+        <a href="/projects/<%= p['id'] %>" class="project-card">
+          <div class="project-color"></div>
+          <h3><%= h(p['name']) %></h3>
+          <p><%= h(p['description'].to_s[0..80]) %></p>
+        </a>
+      <% end %>
+    </div>
+  <% end %>
+</div>

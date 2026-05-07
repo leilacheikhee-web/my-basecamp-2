@@ -1,0 +1,19 @@
+<div class="page">
+  <div class="form-page">
+    <h1>Edit Project</h1>
+    <form method="POST" action="/projects/<%= @project['id'] %>">
+      <div class="form-group">
+        <label>Project Name</label>
+        <input type="text" name="name" value="<%= h(@project['name']) %>" required>
+      </div>
+      <div class="form-group">
+        <label>Description</label>
+        <textarea name="description" rows="4"><%= h(@project['description'].to_s) %></textarea>
+      </div>
+      <div class="form-actions">
+        <a href="/projects/<%= @project['id'] %>" class="btn-secondary">Cancel</a>
+        <button type="submit" class="btn-primary">Save Changes</button>
+      </div>
+    </form>
+  </div>
+</div>

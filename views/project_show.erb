@@ -1,0 +1,110 @@
+<div class="page">
+  <div class="project-header">
+    <div>
+      <h1><%= h(@project['name']) %></h1>
+      <p><%= h(@project['description'].to_s) %></p>
+      <p class="meta">Created by <a href="/users/<%= @project['owner_id'] %>"><%= h(@project['owner_name']) %></a></p>
+    </div>
+    <% if @project['owner_id'] == @user['id'] || @user['is_admin'] == 1 %>
+      <div class="project-header-actions">
+        <a href="/projects/<%= @project['id'] %>/edit" class="btn-secondary">Edit</a>
+        <form method="POST" action="/projects/<%= @project['id'] %>">
+          <input type="hidden" name="_method" value="DELETE">
+          <button class="btn-danger" onclick="return confirm('Delete project?')">Delete</button>
+        </form>
+      </div>
+    <% end %>
+  </div>
+
+  <div class="project-members">
+    <h2>Members (<%= @members.length %>) </h2>
+    <div class="members-list">
+      <% @members.each do |m| %>
+        <div class="member-chip">
+          <span><%= m['username'][0].upcase %></span>
+          <%= h(m['username']) %>
+          <% if @project['owner_id'] == @user['id'] || @user['is_admin'] == 1 %>
+            <form method="POST" action="/projects/<%= @project['id'] %>/members/<%= m['id'] %>" style="display:inline;">
+              <input type="hidden" name="_method" value="DELETE">
+              <button class="btn-small btn-danger" onclick="return confirm('Remove member?')">×</button>
+            </form>
+          <% end %>
+        </div>
+      <% end %>
+    </div>
+    <% if @project['owner_id'] == @user['id'] || @user['is_admin'] == 1 %>
+      <form method="POST" action="/projects/<%= @project['id'] %>/members" class="add-member-form">
+        <select name="user_id" required>
+          <option value="">Select user to add...</option>
+          <% @all_users.each do |u| %>
+            <% already_member = @members.any? { |m| m['id'] == u['id'] } %>
+            <% unless already_member %>
+              <option value="<%= u['id'] %>"><%= h(u['username']) %></option>
+            <% end %>
+          <% end %>
+        </select>
+        <button type="submit" class="btn-primary">Add Member</button>
+      </form>
+    <% end %>
+  </div>
+
+  <% @attachments ||= [] %>
+  <div class="project-attachments">
+    <h2>Attachments (<%= @attachments.length %>)</h2>
+    <div class="attachments-list">
+      <% @attachments.each do |a| %>
+        <div class="attachment-item">
+          <div class="attachment-info">
+            <span class="attachment-format <%= a['format'] %>"><%= a['format'].upcase %></span>
+            <strong><%= h(a['filename']) %></strong>
+            <span class="meta">by <%= h(a['uploader_name']) %> on <%= a['created_at'] %></span>
+          </div>
+          <% if @project['owner_id'] == @user['id'] || a['user_id'] == @user['id'] || @user['is_admin'] == 1 %>
+            <form method="POST" action="/attachments/<%= a['id'] %>" style="display:inline;">
+              <input type="hidden" name="_method" value="DELETE">
+              <button class="btn-small btn-danger">Delete</button>
+            </form>
+          <% end %>
+        </div>
+      <% end %>
+    </div>
+    <div class="add-attachment">
+      <form method="POST" action="/projects/<%= @project['id'] %>/attachments" enctype="multipart/form-data">
+        <input type="file" name="file" accept=".png,.jpg,.jpeg,.pdf,.txt" required>
+        <button type="submit" class="btn-primary">Upload</button>
+      </form>
+    </div>
+  </div>
+
+  <% @threads ||= [] %>
+  <div class="project-threads">
+    <div class="threads-header">
+      <h2>Threads (<%= @threads.length %>)</h2>
+      <% is_admin = @project['owner_id'] == @user['id'] || @user['is_admin'] == 1 %>
+      <% if is_admin %>
+        <a href="/projects/<%= @project['id'] %>/threads/new" class="btn-primary">New Thread</a>
+      <% end %>
+    </div>
+    <div class="threads-list">
+      <% @threads.each do |t| %>
+        <div class="thread-item">
+          <div class="thread-info">
+            <a href="/threads/<%= t['id'] %>" class="thread-title"><%= h(t['title']) %></a>
+            <p class="thread-desc"><%= h(t['description'].to_s) %></p>
+            <span class="meta">by <%= h(t['author_name']) %> on <%= t['created_at'] %></span>
+          </div>
+          <div class="thread-actions">
+            <a href="/threads/<%= t['id'] %>" class="btn-small btn-primary">Reply</a>
+            <% if t['user_id'] == @user['id'] || @project['owner_id'] == @user['id'] || @user['is_admin'] == 1 %>
+              <a href="/threads/<%= t['id'] %>/edit" class="btn-small">Edit</a>
+              <form method="POST" action="/threads/<%= t['id'] %>" style="display:inline;">
+                <input type="hidden" name="_method" value="DELETE">
+                <button class="btn-small btn-danger">Delete</button>
+              </form>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+    </div>
+  </div>
+</div>

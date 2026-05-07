@@ -1,0 +1,32 @@
+<div class="page">
+  <h1>👥 All Users</h1>
+  <div class="users-list">
+    <% @users.each do |u| %>
+      <div class="user-row">
+        <div class="user-avatar"><%= u['username'][0].upcase %></div>
+        <div class="user-info">
+          <a href="/users/<%= u['id'] %>"><strong><%= h(u['username']) %></strong></a>
+          <span><%= h(u['email']) %></span>
+          <% if u['is_admin'] == 1 %><span class="badge admin">Admin</span><% end %>
+        </div>
+        <div class="user-actions">
+          <% if u['id'] != @user['id'] %>
+            <% if u['is_admin'] == 0 %>
+              <form method="POST" action="/users/<%= u['id'] %>/admin">
+                <button class="btn-small">Make Admin</button>
+              </form>
+            <% else %>
+              <form method="POST" action="/users/<%= u['id'] %>/remove_admin">
+                <button class="btn-small danger">Remove Admin</button>
+              </form>
+            <% end %>
+            <form method="POST" action="/users/<%= u['id'] %>">
+              <input type="hidden" name="_method" value="DELETE">
+              <button class="btn-small danger" onclick="return confirm('Delete this user?')">Delete</button>
+            </form>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+  </div>
+</div>

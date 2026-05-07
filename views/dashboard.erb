@@ -1,0 +1,25 @@
+<div class="dashboard">
+  <div class="dashboard-header">
+    <h1>Hey, <%= h(@user['username']) %>! 👋</h1>
+    <a href="/projects/new" class="btn-primary">+ New Project</a>
+  </div>
+  <% if @projects.empty? %>
+    <div class="empty-state">
+      <span>🚀</span>
+      <h2>No projects yet</h2>
+      <p>Create your first project to get started</p>
+      <a href="/projects/new" class="btn-primary">Create a project</a>
+    </div>
+  <% else %>
+    <div class="projects-grid">
+      <% @projects.each do |p| %>
+        <a href="/projects/<%= p['id'] %>" class="project-card">
+          <div class="project-color"></div>
+          <h3><%= h(p['name']) %></h3>
+          <p><%= h(p['description'].to_s[0..80]) %></p>
+          <div class="project-meta">by <%= h(p['owner_name']) %></div>
+        </a>
+      <% end %>
+    </div>
+  <% end %>
+</div>

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MyBasecamp</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<nav class="navbar">
+  <a href="/" class="logo">⛺ MyBasecamp</a>
+  <div class="nav-links">
+    <% if current_user %>
+      <a href="/">Projects</a>
+      <% if current_user['is_admin'] == 1 %>
+        <a href="/users" class="admin-link">👥 Users</a>
+      <% end %>
+      <a href="/users/<%= current_user['id'] %>">@<%= h(current_user['username']) %></a>
+      <form method="POST" action="/logout" style="display:inline">
+        <button type="submit" class="btn-link">Sign out</button>
+      </form>
+    <% else %>
+      <a href="/login">Login</a>
+      <a href="/register" class="btn-primary">Sign up</a>
+    <% end %>
+  </div>
+</nav>
+<main>
+<%= yield %>
+</main>
+</body>
+</html>
