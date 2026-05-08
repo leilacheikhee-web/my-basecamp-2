@@ -13,7 +13,6 @@
 log/
 
 # Dependencies
-Gemfile.lock
 vendor/
 .bundle/
 
