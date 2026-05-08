@@ -1,5 +1,5 @@
 source 'https://rubygems.org'
-
+ruby "3.2.2"
 gem 'sinatra'
 gem 'pg'                    # PostgreSQL adapter for Render
 gem 'sqlite3'               # SQLite for local development
