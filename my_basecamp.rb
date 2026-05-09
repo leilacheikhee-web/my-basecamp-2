@@ -29,12 +29,15 @@ class PostgresWrapper
     @pg_conn.send(method, *args)
   end
 
-  def execute(sql, params = [])
-  # Convert ? placeholders to $1, $2, $3 for PostgreSQL
+def execute(sql, params = [])
   index = 0
   converted_sql = sql.gsub('?') { index += 1; "$#{index}" }
   result = @pg_conn.exec_params(converted_sql, params)
-  result.to_a
+  result.to_a.map do |row|
+    row.transform_values do |val|
+      val =~ /\A-?\d+\z/ ? val.to_i : val
+    end
+  end
 end
 
   def execute_batch(sql)
