@@ -61,6 +61,7 @@ class App < Sinatra::Base
     set :public_folder, File.dirname(__FILE__) + '/public'
     enable :sessions
     set :method_override, true
+    set :protection, false
     set :session_secret, ENV['SESSION_SECRET'] || 'change_me_in_production_a_very_long_random_string_that_is_at_least_64_characters_long'
   end
 
