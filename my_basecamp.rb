@@ -165,6 +165,17 @@ class App < Sinatra::Base
         FOREIGN KEY (thread_id) REFERENCES threads(id),
         FOREIGN KEY (user_id) REFERENCES users(id)
       );
+      CREATE TABLE IF NOT EXISTS notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        admin_id INTEGER NOT NULL,
+        thread_id INTEGER NOT NULL,
+        message_id INTEGER NOT NULL,
+        is_read INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (admin_id) REFERENCES users(id),
+        FOREIGN KEY (thread_id) REFERENCES threads(id),
+        FOREIGN KEY (message_id) REFERENCES messages(id)
+      );
     SQL
     
     # Migration: Add is_admin column to project_members if it doesn't exist
@@ -232,6 +243,17 @@ class App < Sinatra::Base
         updated_at TIMESTAMP DEFAULT now(),
         FOREIGN KEY (thread_id) REFERENCES threads(id),
         FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      CREATE TABLE IF NOT EXISTS notifications (
+        id SERIAL PRIMARY KEY,
+        admin_id INTEGER NOT NULL,
+        thread_id INTEGER NOT NULL,
+        message_id INTEGER NOT NULL,
+        is_read INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT now(),
+        FOREIGN KEY (admin_id) REFERENCES users(id),
+        FOREIGN KEY (thread_id) REFERENCES threads(id),
+        FOREIGN KEY (message_id) REFERENCES messages(id)
       );
     SQL
     
@@ -711,6 +733,32 @@ end
     db.execute('INSERT INTO messages (thread_id, user_id, content) VALUES (?, ?, ?)',
       [thread_id, @user['id'], content])
     
+    # Get the last inserted message ID
+    if using_postgres?
+      result = db.execute('SELECT id FROM messages WHERE thread_id = ? ORDER BY id DESC LIMIT 1', [thread_id])
+    else
+      result = db.execute('SELECT last_insert_rowid() as id')
+    end
+    message_id = result.first['id'] || result.first[:id]
+    
+    # Create notifications for project admins
+    project_admins = db.execute(
+      'SELECT DISTINCT user_id FROM project_members WHERE project_id = ? AND is_admin = 1
+       UNION
+       SELECT id FROM users WHERE id = ? AND is_admin = 1',
+      [@project['id'], @project['owner_id']]
+    )
+    
+    project_admins.each do |admin|
+      admin_id = admin['user_id'] || admin['id']
+      begin
+        db.execute('INSERT INTO notifications (admin_id, thread_id, message_id, is_read) VALUES (?, ?, ?, ?)',
+          [admin_id, thread_id, message_id, 0])
+      rescue => e
+        # Notification might already exist, ignore
+      end
+    end
+    
     redirect "/threads/#{thread_id}"
   end
 
@@ -765,6 +813,59 @@ end
     db.execute('DELETE FROM messages WHERE id = ?', [params['id']])
     
     redirect "/threads/#{thread_id}"
+  end
+
+  # ---- NOTIFICATIONS ----
+  get '/notifications' do
+    require_login
+    @user = current_user
+    redirect '/' unless @user['is_admin'] == 1
+    
+    @notifications = db.execute(
+      'SELECT n.*, t.title as thread_title, m.content as message_content, u.username as author_name, p.name as project_name
+       FROM notifications n
+       JOIN threads t ON n.thread_id = t.id
+       JOIN messages m ON n.message_id = m.id
+       JOIN users u ON m.user_id = u.id
+       JOIN projects p ON t.project_id = p.id
+       WHERE n.admin_id = ?
+       ORDER BY n.is_read ASC, n.created_at DESC',
+      [@user['id']]
+    )
+    
+    erb :notifications
+  end
+
+  get '/notifications/count' do
+    require_login
+    @user = current_user
+    result = db.execute(
+      'SELECT COUNT(*) as count FROM notifications WHERE admin_id = ? AND is_read = 0',
+      [@user['id']]
+    ).first
+    count = result['count'] || result[:count] || 0
+    content_type :json
+    { count: count }.to_json
+  end
+
+  post '/notifications/:id/read' do
+    require_login
+    @user = current_user
+    notification = db.execute('SELECT * FROM notifications WHERE id = ?', [params['id']]).first
+    halt 404 unless notification
+    halt 403 unless notification['admin_id'] == @user['id']
+    
+    db.execute('UPDATE notifications SET is_read = 1 WHERE id = ?', [params['id']])
+    redirect '/notifications'
+  end
+
+  post '/notifications/mark-all-read' do
+    require_login
+    @user = current_user
+    redirect '/' unless @user['is_admin'] == 1
+    
+    db.execute('UPDATE notifications SET is_read = 1 WHERE admin_id = ? AND is_read = 0', [@user['id']])
+    redirect '/notifications'
   end
 
   run! if app_file == $0
