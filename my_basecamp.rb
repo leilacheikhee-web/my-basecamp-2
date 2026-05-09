@@ -283,20 +283,22 @@ class App < Sinatra::Base
 
   # ===================== ROUTES =====================
 
-  get '/' do
-    @user = current_user
-    if @user
-      @projects = db.execute(
-        'SELECT p.*, u.username as owner_name FROM projects p JOIN users u ON p.owner_id = u.id
-         LEFT JOIN project_members pm ON pm.project_id = p.id
-         WHERE p.owner_id = ? OR pm.user_id = ? GROUP BY p.id ORDER BY p.created_at DESC',
-        [@user['id'], @user['id']]
-      )
-      erb :dashboard
-    else
-      erb :home
-    end
+ get '/' do
+  @user = current_user
+  if @user
+    @projects = db.execute(
+      'SELECT DISTINCT p.*, u.username as owner_name FROM projects p 
+       JOIN users u ON p.owner_id = u.id
+       LEFT JOIN project_members pm ON pm.project_id = p.id
+       WHERE p.owner_id = ? OR pm.user_id = ?
+       ORDER BY p.created_at DESC',
+      [@user['id'], @user['id']]
+    )
+    erb :dashboard
+  else
+    erb :home
   end
+end
 
   # ---- AUTH ----
   get '/register' do
