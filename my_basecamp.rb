@@ -31,12 +31,16 @@ class PostgresWrapper
 
   def execute(sql, params = [])
     result = @pg_conn.exec_params(sql, params)
-    result.map { |row| row }
+    # Convert PG result to array of hashes with string keys for SQLite compatibility
+    result.to_a
   end
 
   def execute_batch(sql)
-    # Split SQL statements and execute each
-    @pg_conn.exec(sql)
+    # Split SQL statements and execute each, handling multiple statements
+    statements = sql.split(';').map(&:strip).reject(&:empty?)
+    statements.each do |stmt|
+      @pg_conn.exec(stmt) unless stmt.empty?
+    end
   end
 
   def close
@@ -79,17 +83,23 @@ class App < Sinatra::Base
   end
 
   def establish_postgres_connection
-    uri = URI.parse(ENV['DATABASE_URL'])
-    conn = PG.connect(
-      host: uri.host,
-      port: uri.port,
-      user: uri.user,
-      password: uri.password,
-      dbname: uri.path.delete('/')
-    )
-    wrapper = PostgresWrapper.new(conn)
-    init_postgres_tables(wrapper)
-    wrapper
+    begin
+      uri = URI.parse(ENV['DATABASE_URL'])
+      conn = PG.connect(
+        host: uri.host,
+        port: uri.port,
+        user: uri.user,
+        password: uri.password,
+        dbname: uri.path.delete('/')
+      )
+      wrapper = PostgresWrapper.new(conn)
+      init_postgres_tables(wrapper)
+      wrapper
+    rescue => e
+      puts "PostgreSQL connection error: #{e.class} - #{e.message}"
+      puts e.backtrace.join("\n")
+      raise
+    end
   end
 
   def init_sqlite_tables(d)
@@ -321,10 +331,17 @@ class App < Sinatra::Base
       db.execute('UPDATE users SET is_admin = 1 WHERE id = ?', [user['id']]) if count == 1
       session[:user_id] = user['id']
       redirect '/'
+    rescue BCrypt::Errors::InvalidHash => e
+      @error = 'Password processing error'
+      erb :register
     rescue => e
-      if e.message.include?('UNIQUE constraint failed') || e.message.include?('duplicate key')
+      if e.message.include?('UNIQUE constraint failed') || e.message.include?('duplicate key') || e.message.include?('violates unique constraint')
         @error = 'Username or email already taken'
+      elsif e.message.include?('no such table') || e.message.include?('does not exist')
+        @error = 'Database error: tables not initialized'
       else
+        puts "Registration error: #{e.class} - #{e.message}"
+        puts e.backtrace.join("\n")
         @error = 'An error occurred during registration'
       end
       erb :register
