@@ -2,6 +2,14 @@
 
 ---
 
+##  Live Demo
+
+**[Click here to view My Basecamp 2](https://my-basecamp-2-1-98dw.onrender.com/)**
+
+> https://my-basecamp-2-1-98dw.onrender.com/
+
+---
+
 ## Task
 
 Build a Basecamp-like project management web app with user authentication, roles, and project management. Includes attachments, discussion threads, and messaging.
@@ -106,38 +114,29 @@ First registered user becomes admin automatically.
 
 ## Deployment to Render
 
-This app is configured to run on Render (or any cloud platform) with PostgreSQL.
-
-### Prerequisites
-
-- Git repository pushed to GitHub
-- Render account (render.com)
+This app is configured to run on Render with PostgreSQL.
 
 ### Environment Variables
 
-The app uses the following environment variables:
-
 - `DATABASE_URL` - PostgreSQL connection string (automatically provided by Render)
-- `SESSION_SECRET` - A secure random string for session encryption (generate one)
+- `SESSION_SECRET` - A secure random string for session encryption
 - `PORT` - Port to run on (defaults to 8080)
-- `RACK_ENV` - Set to 'production' on Render
+- `RACK_ENV` - Set to `production` on Render
 
 ### Setup on Render
 
 1. **Create a new Web Service on Render**
    - Connect your GitHub repository
-   - Choose Node runtime
    - Build command: `bundle install`
    - Start command: `bundle exec rackup --host 0.0.0.0 --port $PORT`
 
 2. **Add PostgreSQL Database**
    - Create a new PostgreSQL instance on Render
-   - Note the internal database URL
+   - Render automatically injects `DATABASE_URL`
 
 3. **Configure Environment Variables**
-   - Add `SESSION_SECRET`: Generate a secure random string (at least 64 characters)
+   - Add `SESSION_SECRET`: Generate with `ruby -e "puts SecureRandom.random_bytes(32).unpack('H*')[0]"`
    - Add `RACK_ENV`: Set to `production`
-   - Render automatically injects `DATABASE_URL`
 
 ### Local Development
 
@@ -147,45 +146,18 @@ The app uses the following environment variables:
    cp .env.example .env
    ```
 
-2. Edit `.env` with your local settings (or leave commented for SQLite)
-
-3. Install dependencies:
+2. Install dependencies:
 
    ```bash
    bundle install
    ```
 
-4. Run the app:
+3. Run the app:
    ```bash
    bundle exec rackup
    ```
 
 The app will use SQLite locally and PostgreSQL when `DATABASE_URL` is set.
-
-### Database Handling
-
-- **Local**: Uses SQLite (`basecamp.db`) automatically
-- **Production (Render)**: Uses PostgreSQL via `DATABASE_URL`
-
-The app automatically detects which database to use based on the `DATABASE_URL` environment variable. Tables are created automatically on first run.
-
-### Important Notes for Cloud Deployment
-
-⚠️ **Ephemeral Filesystem**: Render's file system is ephemeral (read-only for app code, temporary for generated files).
-
-- Uploaded files in `public/uploads/` will be lost when the app restarts
-- For persistent file storage, use:
-  - Render Disk (add a persistent volume)
-  - AWS S3 or similar cloud storage
-  - Configure in `UPLOAD_DIRECTORY` env variable
-
-### Generate Session Secret
-
-```bash
-ruby -e "puts SecureRandom.random_bytes(32).unpack('H*')[0]"
-```
-
-Then set `SESSION_SECRET` in Render environment variables.
 
 ### The Core Team
 
