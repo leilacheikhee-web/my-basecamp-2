@@ -30,10 +30,12 @@ class PostgresWrapper
   end
 
   def execute(sql, params = [])
-    result = @pg_conn.exec_params(sql, params)
-    # Convert PG result to array of hashes with string keys for SQLite compatibility
-    result.to_a
-  end
+  # Convert ? placeholders to $1, $2, $3 for PostgreSQL
+  index = 0
+  converted_sql = sql.gsub('?') { index += 1; "$#{index}" }
+  result = @pg_conn.exec_params(converted_sql, params)
+  result.to_a
+end
 
   def execute_batch(sql)
     # Split SQL statements and execute each, handling multiple statements
