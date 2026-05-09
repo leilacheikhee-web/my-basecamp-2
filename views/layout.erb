@@ -5,6 +5,33 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MyBasecamp</title>
 <link rel="stylesheet" href="/style.css">
+<style>
+  .notification-badge {
+    display: inline-block;
+    position: relative;
+  }
+  
+  .notification-badge .badge {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    background-color: #ff4444;
+    color: white;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+    min-width: 20px;
+  }
+  
+  .notification-badge .badge.hidden {
+    display: none;
+  }
+</style>
 </head>
 <body>
 <nav class="navbar">
@@ -13,6 +40,10 @@
     <% if current_user %>
       <a href="/">Projects</a>
       <% if current_user['is_admin'] == 1 %>
+        <a href="/notifications" class="notification-badge">
+          💬 Notifications
+          <span class="badge" id="notification-badge">0</span>
+        </a>
         <a href="/users" class="admin-link">👥 Users</a>
       <% end %>
       <a href="/users/<%= current_user['id'] %>">@<%= h(current_user['username']) %></a>
@@ -28,5 +59,30 @@
 <main>
 <%= yield %>
 </main>
+
+<script>
+  function updateNotificationCount() {
+    <% if current_user && current_user['is_admin'] == 1 %>
+    fetch('/notifications/count')
+      .then(response => response.json())
+      .then(data => {
+        const badge = document.getElementById('notification-badge');
+        if (data.count > 0) {
+          badge.textContent = data.count;
+          badge.classList.remove('hidden');
+        } else {
+          badge.classList.add('hidden');
+        }
+      })
+      .catch(error => console.error('Error fetching notification count:', error));
+    <% end %>
+  }
+  
+  // Update count on page load
+  document.addEventListener('DOMContentLoaded', updateNotificationCount);
+  
+  // Update count every 30 seconds
+  setInterval(updateNotificationCount, 30000);
+</script>
 </body>
 </html>

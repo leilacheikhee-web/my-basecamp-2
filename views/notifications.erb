@@ -1,0 +1,154 @@
+<div class="container">
+  <div class="header-section">
+    <h1>💬 Thread Notifications</h1>
+    <% if @notifications.any? { |n| n['is_read'] == 0 } %>
+      <form method="POST" action="/notifications/mark-all-read" style="display:inline">
+        <button type="submit" class="btn-secondary">Mark all as read</button>
+      </form>
+    <% end %>
+  </div>
+
+  <% if @notifications.empty? %>
+    <div class="empty-state">
+      <p>No notifications yet</p>
+    </div>
+  <% else %>
+    <div class="notifications-list">
+      <% @notifications.each do |notification| %>
+        <div class="notification-item <%= notification['is_read'] == 0 ? 'unread' : 'read' %>">
+          <div class="notification-header">
+            <div class="notification-meta">
+              <h3><%= h(notification['thread_title']) %></h3>
+              <p class="notification-details">
+                <strong>Project:</strong> <%= h(notification['project_name']) %> | 
+                <strong>Author:</strong> <%= h(notification['author_name']) %> | 
+                <strong>Time:</strong> <%= notification['created_at'] %>
+              </p>
+            </div>
+            <% if notification['is_read'] == 0 %>
+              <form method="POST" action="/notifications/<%= notification['id'] %>/read" style="display:inline">
+                <button type="submit" class="btn-small">Mark as read</button>
+              </form>
+            <% else %>
+              <span class="badge-read">✓ Read</span>
+            <% end %>
+          </div>
+          
+          <div class="notification-content">
+            <p><strong>Reply:</strong></p>
+            <blockquote><%= h(notification['message_content']) %></blockquote>
+          </div>
+          
+          <div class="notification-actions">
+            <a href="/threads/<%= notification['thread_id'] %>" class="btn-primary">View Thread</a>
+          </div>
+        </div>
+      <% end %>
+    </div>
+  <% end %>
+</div>
+
+<style>
+  .header-section {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+    border-bottom: 2px solid #ddd;
+    padding-bottom: 1rem;
+  }
+
+  .notifications-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .notification-item {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 1.5rem;
+    background-color: #f9f9f9;
+    transition: all 0.3s ease;
+  }
+
+  .notification-item.unread {
+    background-color: #f0f4ff;
+    border-left: 4px solid #4a90e2;
+  }
+
+  .notification-item.read {
+    background-color: #f9f9f9;
+    opacity: 0.8;
+  }
+
+  .notification-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1rem;
+  }
+
+  .notification-meta h3 {
+    margin: 0 0 0.5rem 0;
+    color: #333;
+  }
+
+  .notification-details {
+    font-size: 0.9rem;
+    color: #666;
+    margin: 0;
+  }
+
+  .notification-content {
+    margin: 1rem 0;
+    padding: 1rem;
+    background-color: white;
+    border-radius: 4px;
+    border-left: 3px solid #4a90e2;
+  }
+
+  .notification-content blockquote {
+    margin: 0.5rem 0;
+    padding-left: 1rem;
+    border-left: 2px solid #ddd;
+    font-style: italic;
+    color: #555;
+  }
+
+  .notification-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+
+  .btn-small {
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+    background-color: #4a90e2;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+  }
+
+  .btn-small:hover {
+    background-color: #357abd;
+  }
+
+  .badge-read {
+    display: inline-block;
+    background-color: #4caf50;
+    color: white;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.9rem;
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 3rem;
+    color: #999;
+  }
+</style>

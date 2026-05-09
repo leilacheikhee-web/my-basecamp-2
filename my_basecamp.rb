@@ -1,92 +1,267 @@
 require 'sinatra'
 require 'sinatra/base'
-require 'sqlite3'
 require 'bcrypt'
 require 'json'
 require 'fileutils'
+require 'uri'
+require 'dotenv/load'  # Load .env file for local development
+
+# Database setup based on environment
+begin
+  require 'pg'
+rescue LoadError
+  # pg might not be installed locally
+end
+
+begin
+  require 'sqlite3'
+rescue LoadError
+  # sqlite3 might not be installed in production
+end
+
+# PostgreSQL result wrapper to match SQLite's interface
+class PostgresWrapper
+  def initialize(pg_conn)
+    @pg_conn = pg_conn
+  end
+
+  def method_missing(method, *args)
+    @pg_conn.send(method, *args)
+  end
+
+def execute(sql, params = [])
+  index = 0
+  converted_sql = sql.gsub('?') { index += 1; "$#{index}" }
+  result = @pg_conn.exec_params(converted_sql, params)
+  result.to_a.map do |row|
+    row.transform_values do |val|
+      val =~ /\A-?\d+\z/ ? val.to_i : val
+    end
+  end
+end
+
+  def execute_batch(sql)
+    # Split SQL statements and execute each, handling multiple statements
+    statements = sql.split(';').map(&:strip).reject(&:empty?)
+    statements.each do |stmt|
+      @pg_conn.exec(stmt) unless stmt.empty?
+    end
+  end
+
+  def close
+    @pg_conn.close
+  end
+end
 
 class App < Sinatra::Base
   configure do
-    set :port, 8080
+    set :port, ENV['PORT'] || 8080
     set :bind, '0.0.0.0'
     set :views, File.dirname(__FILE__) + '/views'
     set :public_folder, File.dirname(__FILE__) + '/public'
     enable :sessions
     set :method_override, true
-    set :session_secret, 'a_very_long_random_string_that_is_at_least_64_characters_long_1234567890'
+    set :session_secret, ENV['SESSION_SECRET'] || 'change_me_in_production_a_very_long_random_string_that_is_at_least_64_characters_long'
+  end
+
+  def using_postgres?
+    !ENV['DATABASE_URL'].nil?
   end
 
   def db
     @db ||= begin
-      d = SQLite3::Database.new(File.dirname(__FILE__) + '/basecamp.db')
-      d.results_as_hash = true
-      d.execute_batch <<-SQL
-        CREATE TABLE IF NOT EXISTS users (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          username TEXT UNIQUE NOT NULL,
-          email TEXT UNIQUE NOT NULL,
-          password_hash TEXT NOT NULL,
-          is_admin INTEGER DEFAULT 0,
-          created_at TEXT DEFAULT (datetime('now'))
-        );
-        CREATE TABLE IF NOT EXISTS projects (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          name TEXT NOT NULL,
-          description TEXT,
-          owner_id INTEGER NOT NULL,
-          created_at TEXT DEFAULT (datetime('now')),
-          FOREIGN KEY (owner_id) REFERENCES users(id)
-        );
-        CREATE TABLE IF NOT EXISTS project_members (
-          project_id INTEGER,
-          user_id INTEGER,
-          is_admin INTEGER DEFAULT 0,
-          PRIMARY KEY (project_id, user_id),
-          FOREIGN KEY (project_id) REFERENCES projects(id),
-          FOREIGN KEY (user_id) REFERENCES users(id)
-        );
-        CREATE TABLE IF NOT EXISTS attachments (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          project_id INTEGER NOT NULL,
-          user_id INTEGER NOT NULL,
-          filename TEXT NOT NULL,
-          format TEXT NOT NULL,
-          file_path TEXT NOT NULL,
-          created_at TEXT DEFAULT (datetime('now')),
-          FOREIGN KEY (project_id) REFERENCES projects(id),
-          FOREIGN KEY (user_id) REFERENCES users(id)
-        );
-        CREATE TABLE IF NOT EXISTS threads (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          project_id INTEGER NOT NULL,
-          user_id INTEGER NOT NULL,
-          title TEXT NOT NULL,
-          description TEXT,
-          created_at TEXT DEFAULT (datetime('now')),
-          updated_at TEXT DEFAULT (datetime('now')),
-          FOREIGN KEY (project_id) REFERENCES projects(id),
-          FOREIGN KEY (user_id) REFERENCES users(id)
-        );
-        CREATE TABLE IF NOT EXISTS messages (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          thread_id INTEGER NOT NULL,
-          user_id INTEGER NOT NULL,
-          content TEXT NOT NULL,
-          created_at TEXT DEFAULT (datetime('now')),
-          updated_at TEXT DEFAULT (datetime('now')),
-          FOREIGN KEY (thread_id) REFERENCES threads(id),
-          FOREIGN KEY (user_id) REFERENCES users(id)
-        );
-      SQL
-      
-      # Migration: Add is_admin column to project_members if it doesn't exist
-      begin
-        d.execute("ALTER TABLE project_members ADD COLUMN is_admin INTEGER DEFAULT 0")
-      rescue SQLite3::SQLException => e
-        # Column already exists or other error, ignore
+      if using_postgres?
+        require 'pg'
+        establish_postgres_connection
+      else
+        require 'sqlite3'
+        establish_sqlite_connection
       end
-      
-      d
+    end
+  end
+
+  def establish_sqlite_connection
+    d = SQLite3::Database.new(File.dirname(__FILE__) + '/basecamp.db')
+    d.results_as_hash = true
+    init_sqlite_tables(d)
+    d
+  end
+
+  def establish_postgres_connection
+    begin
+      uri = URI.parse(ENV['DATABASE_URL'])
+      conn = PG.connect(
+        host: uri.host,
+        port: uri.port,
+        user: uri.user,
+        password: uri.password,
+        dbname: uri.path.delete('/')
+      )
+      wrapper = PostgresWrapper.new(conn)
+      init_postgres_tables(wrapper)
+      wrapper
+    rescue => e
+      puts "PostgreSQL connection error: #{e.class} - #{e.message}"
+      puts e.backtrace.join("\n")
+      raise
+    end
+  end
+
+  def init_sqlite_tables(d)
+    d.execute_batch <<-SQL
+      CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        is_admin INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+      CREATE TABLE IF NOT EXISTS projects (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        description TEXT,
+        owner_id INTEGER NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (owner_id) REFERENCES users(id)
+      );
+      CREATE TABLE IF NOT EXISTS project_members (
+        project_id INTEGER,
+        user_id INTEGER,
+        is_admin INTEGER DEFAULT 0,
+        PRIMARY KEY (project_id, user_id),
+        FOREIGN KEY (project_id) REFERENCES projects(id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      CREATE TABLE IF NOT EXISTS attachments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        filename TEXT NOT NULL,
+        format TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (project_id) REFERENCES projects(id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      CREATE TABLE IF NOT EXISTS threads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (project_id) REFERENCES projects(id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        thread_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (thread_id) REFERENCES threads(id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      CREATE TABLE IF NOT EXISTS notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        admin_id INTEGER NOT NULL,
+        thread_id INTEGER NOT NULL,
+        message_id INTEGER NOT NULL,
+        is_read INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (admin_id) REFERENCES users(id),
+        FOREIGN KEY (thread_id) REFERENCES threads(id),
+        FOREIGN KEY (message_id) REFERENCES messages(id)
+      );
+    SQL
+    
+    # Migration: Add is_admin column to project_members if it doesn't exist
+    begin
+      d.execute("ALTER TABLE project_members ADD COLUMN is_admin INTEGER DEFAULT 0")
+    rescue SQLite3::SQLException => e
+      # Column already exists or other error, ignore
+    end
+  end
+
+  def init_postgres_tables(conn)
+    conn.execute_batch <<-SQL
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        is_admin INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS projects (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        owner_id INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT now(),
+        FOREIGN KEY (owner_id) REFERENCES users(id)
+      );
+      CREATE TABLE IF NOT EXISTS project_members (
+        project_id INTEGER,
+        user_id INTEGER,
+        is_admin INTEGER DEFAULT 0,
+        PRIMARY KEY (project_id, user_id),
+        FOREIGN KEY (project_id) REFERENCES projects(id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      CREATE TABLE IF NOT EXISTS attachments (
+        id SERIAL PRIMARY KEY,
+        project_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        filename TEXT NOT NULL,
+        format TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT now(),
+        FOREIGN KEY (project_id) REFERENCES projects(id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      CREATE TABLE IF NOT EXISTS threads (
+        id SERIAL PRIMARY KEY,
+        project_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        created_at TIMESTAMP DEFAULT now(),
+        updated_at TIMESTAMP DEFAULT now(),
+        FOREIGN KEY (project_id) REFERENCES projects(id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      CREATE TABLE IF NOT EXISTS messages (
+        id SERIAL PRIMARY KEY,
+        thread_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT now(),
+        updated_at TIMESTAMP DEFAULT now(),
+        FOREIGN KEY (thread_id) REFERENCES threads(id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      CREATE TABLE IF NOT EXISTS notifications (
+        id SERIAL PRIMARY KEY,
+        admin_id INTEGER NOT NULL,
+        thread_id INTEGER NOT NULL,
+        message_id INTEGER NOT NULL,
+        is_read INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT now(),
+        FOREIGN KEY (admin_id) REFERENCES users(id),
+        FOREIGN KEY (thread_id) REFERENCES threads(id),
+        FOREIGN KEY (message_id) REFERENCES messages(id)
+      );
+    SQL
+    
+    # Migration: Add is_admin column if it doesn't exist
+    begin
+      conn.execute("ALTER TABLE project_members ADD COLUMN is_admin INTEGER DEFAULT 0")
+    rescue PG::Error => e
+      # Column already exists, ignore
     end
   end
 
@@ -133,20 +308,22 @@ class App < Sinatra::Base
 
   # ===================== ROUTES =====================
 
-  get '/' do
-    @user = current_user
-    if @user
-      @projects = db.execute(
-        'SELECT p.*, u.username as owner_name FROM projects p JOIN users u ON p.owner_id = u.id
-         LEFT JOIN project_members pm ON pm.project_id = p.id
-         WHERE p.owner_id = ? OR pm.user_id = ? GROUP BY p.id ORDER BY p.created_at DESC',
-        [@user['id'], @user['id']]
-      )
-      erb :dashboard
-    else
-      erb :home
-    end
+ get '/' do
+  @user = current_user
+  if @user
+    @projects = db.execute(
+      'SELECT DISTINCT p.*, u.username as owner_name FROM projects p 
+       JOIN users u ON p.owner_id = u.id
+       LEFT JOIN project_members pm ON pm.project_id = p.id
+       WHERE p.owner_id = ? OR pm.user_id = ?
+       ORDER BY p.created_at DESC',
+      [@user['id'], @user['id']]
+    )
+    erb :dashboard
+  else
+    erb :home
   end
+end
 
   # ---- AUTH ----
   get '/register' do
@@ -183,8 +360,19 @@ class App < Sinatra::Base
       db.execute('UPDATE users SET is_admin = 1 WHERE id = ?', [user['id']]) if count == 1
       session[:user_id] = user['id']
       redirect '/'
-    rescue SQLite3::ConstraintException
-      @error = 'Username or email already taken'
+    rescue BCrypt::Errors::InvalidHash => e
+      @error = 'Password processing error'
+      erb :register
+    rescue => e
+      if e.message.include?('UNIQUE constraint failed') || e.message.include?('duplicate key') || e.message.include?('violates unique constraint')
+        @error = 'Username or email already taken'
+      elsif e.message.include?('no such table') || e.message.include?('does not exist')
+        @error = 'Database error: tables not initialized'
+      else
+        puts "Registration error: #{e.class} - #{e.message}"
+        puts e.backtrace.join("\n")
+        @error = 'An error occurred during registration'
+      end
       erb :register
     end
   end
@@ -341,7 +529,8 @@ class App < Sinatra::Base
     begin
       db.execute('INSERT INTO project_members (project_id, user_id) VALUES (?, ?)',
         [project_id, user_id])
-    rescue SQLite3::ConstraintException
+    rescue => e
+      # Member already exists or other constraint error
     end
     redirect "/projects/#{project_id}"
   end
@@ -496,8 +685,13 @@ class App < Sinatra::Base
       return erb :thread_edit
     end
     
-    db.execute('UPDATE threads SET title = ?, description = ?, updated_at = datetime("now") WHERE id = ?',
-      [title, description, params['id']])
+    if using_postgres?
+      db.execute('UPDATE threads SET title = ?, description = ?, updated_at = now() WHERE id = ?',
+        [title, description, params['id']])
+    else
+      db.execute('UPDATE threads SET title = ?, description = ?, updated_at = datetime("now") WHERE id = ?',
+        [title, description, params['id']])
+    end
     
     redirect "/threads/#{params['id']}"
   end
@@ -539,6 +733,32 @@ class App < Sinatra::Base
     db.execute('INSERT INTO messages (thread_id, user_id, content) VALUES (?, ?, ?)',
       [thread_id, @user['id'], content])
     
+    # Get the last inserted message ID
+    if using_postgres?
+      result = db.execute('SELECT id FROM messages WHERE thread_id = ? ORDER BY id DESC LIMIT 1', [thread_id])
+    else
+      result = db.execute('SELECT last_insert_rowid() as id')
+    end
+    message_id = result.first['id'] || result.first[:id]
+    
+    # Create notifications for project admins
+    project_admins = db.execute(
+      'SELECT DISTINCT user_id FROM project_members WHERE project_id = ? AND is_admin = 1
+       UNION
+       SELECT id FROM users WHERE id = ? AND is_admin = 1',
+      [@project['id'], @project['owner_id']]
+    )
+    
+    project_admins.each do |admin|
+      admin_id = admin['user_id'] || admin['id']
+      begin
+        db.execute('INSERT INTO notifications (admin_id, thread_id, message_id, is_read) VALUES (?, ?, ?, ?)',
+          [admin_id, thread_id, message_id, 0])
+      rescue => e
+        # Notification might already exist, ignore
+      end
+    end
+    
     redirect "/threads/#{thread_id}"
   end
 
@@ -569,8 +789,13 @@ class App < Sinatra::Base
       return erb :message_edit
     end
     
-    db.execute('UPDATE messages SET content = ?, updated_at = datetime("now") WHERE id = ?',
-      [content, params['id']])
+    if using_postgres?
+      db.execute('UPDATE messages SET content = ?, updated_at = now() WHERE id = ?',
+        [content, params['id']])
+    else
+      db.execute('UPDATE messages SET content = ?, updated_at = datetime("now") WHERE id = ?',
+        [content, params['id']])
+    end
     
     @thread = db.execute('SELECT * FROM threads WHERE id = ?', [@message['thread_id']]).first
     redirect "/threads/#{@thread['id']}"
@@ -588,6 +813,59 @@ class App < Sinatra::Base
     db.execute('DELETE FROM messages WHERE id = ?', [params['id']])
     
     redirect "/threads/#{thread_id}"
+  end
+
+  # ---- NOTIFICATIONS ----
+  get '/notifications' do
+    require_login
+    @user = current_user
+    redirect '/' unless @user['is_admin'] == 1
+    
+    @notifications = db.execute(
+      'SELECT n.*, t.title as thread_title, m.content as message_content, u.username as author_name, p.name as project_name
+       FROM notifications n
+       JOIN threads t ON n.thread_id = t.id
+       JOIN messages m ON n.message_id = m.id
+       JOIN users u ON m.user_id = u.id
+       JOIN projects p ON t.project_id = p.id
+       WHERE n.admin_id = ?
+       ORDER BY n.is_read ASC, n.created_at DESC',
+      [@user['id']]
+    )
+    
+    erb :notifications
+  end
+
+  get '/notifications/count' do
+    require_login
+    @user = current_user
+    result = db.execute(
+      'SELECT COUNT(*) as count FROM notifications WHERE admin_id = ? AND is_read = 0',
+      [@user['id']]
+    ).first
+    count = result['count'] || result[:count] || 0
+    content_type :json
+    { count: count }.to_json
+  end
+
+  post '/notifications/:id/read' do
+    require_login
+    @user = current_user
+    notification = db.execute('SELECT * FROM notifications WHERE id = ?', [params['id']]).first
+    halt 404 unless notification
+    halt 403 unless notification['admin_id'] == @user['id']
+    
+    db.execute('UPDATE notifications SET is_read = 1 WHERE id = ?', [params['id']])
+    redirect '/notifications'
+  end
+
+  post '/notifications/mark-all-read' do
+    require_login
+    @user = current_user
+    redirect '/' unless @user['is_admin'] == 1
+    
+    db.execute('UPDATE notifications SET is_read = 1 WHERE admin_id = ? AND is_read = 0', [@user['id']])
+    redirect '/notifications'
   end
 
   run! if app_file == $0
