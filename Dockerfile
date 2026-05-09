@@ -1,4 +1,4 @@
-FROM ruby:3.2
+FROM ruby:3.1
 
 # Install system dependencies
 RUN apt-get update -qq && apt-get install -y \
