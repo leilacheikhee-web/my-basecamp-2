@@ -4,7 +4,6 @@ require 'bcrypt'
 require 'json'
 require 'fileutils'
 require 'uri'
-require 'dotenv/load'  # Load .env file for local development
 
 # Database setup based on environment
 begin
